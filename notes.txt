@@ -1,0 +1,191 @@
+Notes for the J Compiler
+
+Pipeline:
+	1. J Program filename passed into jc.c's main function
+	2. J program read in and parsed using token.c
+	3. Push information and literals to the top of a stack that represents the working memory 
+	of the program
+	4. Write to the assembly file whenever a command is encountered while parsing and pop off 
+	necessary arguments from the stack
+	5. Close the output assembly file
+
+Compiling: High-Level Lingo -> Assembly
+Assembling: Assembly -> Machine Code
+Executing: Computer running machine code
+
+DEFUN, IDENT, RETURN, 
+When you run into a DEFUN, write the function body to memory (particularly User Code). When the 
+function is called JSR to that location in memory and make a frame for that function. Once the 
+function is complete, RET back to the RA stored in R7; this event will be triggered by RETURN.
+IDENT is for names of functions. Any function call is an IDENT token. For this I should simply 
+JSR to the function label. We assume that the appropriate function already exists somewhere in 
+memory.
+When a function is called, all of its arguments should already be on the stack. So, we should 
+only need to push 3 spaces onto the stack for the Retrun Value (RV), the Return Address (RA), 
+and the Frame Pointer (FP). The SP is pointing at the top of the stack and the FP is still 
+pointing to the old frame's base. So, move the FP to where the SP is and then make your local
+variables and start performing the commands in the function body.
+An IDENT is anything that meets this criteria: a function name must start with an alphabetical
+character and can consist of alphanumeric characters or underscores.
+
+PLUS, MINUS, MUL, DIV, MOD, 
+AND, OR, NOT, 
+LT, LE, EQ, GE, GT,
+For these functions, they will pop off either the top two elts of the stack or only the head and
+pass those operands into registers and push the return value back to the top of the stack.
+
+IF, ELSE, ENDIF, 
+Executes if body if the top of the stack has a nonzero number, otherwise, the program should 
+execute the else body. All conditional control statements should be capped with an endif.
+
+DROP, DUP, SWAP, ROT,
+Just simple stack operations. So I should definitely have a stack for representing working 
+memory.
+
+ARG
+There should be an integer between 1 and 20 directly after 'arg' in the .j file. This is the
+index of the argument that I will be accessing. All necessary arguments should be pushed to the 
+top of the stack before the function call (IDENT). This function makes a copy of the argument 
+and pushes it to the top of stack. All arguments for a function are just under its Return Value 
+(RV).
+
+LITERAL
+The range of a literal is whatever can fit into an LC$ 16-bit memory address. Anything out of 
+range for a literal should throw an error.
+0x... should be interpreted as a hex literal.
+
+BROKEN_TOKEN
+If the current token is marked with the BROKEN_TOKEN enum, print "Compiler Error" and exit(1).
+This will be anything that does not meet the criteria for anyof the other enums.
+
+
+
+The idea is to convert J code into assembly in which the assembly keeps track of the stack.
+We should not be simulating the stack with an array; we are directly manipulating the actual 
+stack in LC4 memory.
+
+I think I am will only need 1 stack. This stack will perform function management and will 
+simulate the stack-oriented behavior of J. When functions are declared and defined using 
+defun, I will write the contents of the function into the User Code section.
+
+The J Compiler should compile statement by statemnet (not function by function like a real 
+compiler)
+
+The stack in J will be somewhat of the equivalent to the memory array in non
+
+Both the User and OS Data sections are divided into 3 sections: Global Variable Space, Heap 
+Space, and Stack Space. The hardware does not enforce this distinction, so it is possible to 
+spill into these memory unknowingly.
+
+Files that include liblc4.h need to be compiled using lcc instead of clang because they 
+contain LC4 content.
+
+I can return string literals because they are allocated in a read-only section of memory at compile time.
+
+It finally looks like my HAND-MADE token reader is working fairly well. But, I have been noticing some issues and I think I see where they are arising. I have tried a number of things that seem to mitigate the issue to some degree:
+	1. The function that reads the input J file asks for a token pointer and I have realized
+		that I have been calling thi sfunction in loop to access consecutive words, but I
+		have been passing in the same token address, so it has really been only editing the 
+		same token over and over again. To fix this, I declare a token that does the first file
+		read and then I declare another token in the scope of the loop that redeclared every
+		time the program iterates through the for loop.
+
+	2. Another problem is that I think my string field in my struct is not null-terminating.
+		To fix this, I just add a null character to the end of the string when I write into the
+		string after I exit the for loop that writes to the string.
+
+	3. The final problem is that it seems that some values for fields persists at each read. 
+		This can be solved by initializing these fields to some default value whenever I use 
+		them. I think this happens because the fields technically contain garbage and since 
+		the stack is pushing the same function and struct to the top of the stack with every 
+		iteration, that garbage persists through iterations and appears in the struct when the 
+		struct is printed because the old function order, size, and structure is exactly 
+		identical to the previous.
+
+	4. Initially I was having an issue where the token would never end. It would just keep
+	reading until it hit the maximum length for the string inside of the token.
+		This was due to some faulty logic in the loop that checks if a token has ended.
+		I was using a bunch of OR statements when I should have been using AND.
+
+	5. I was also able to fix the issue with the last token being printed twice. I didn't
+		think much on how this was possible, but I had a hunch that the token was being read
+		in one too many times at the end due to the return value of the read_token function 
+		ot being flipped to 1 exactly when I want. I found it! I do change the return to 1 
+		then reach the EOF without encountering a valid token, but I do not return 1 when the 
+		EOF is reached in the same read call as a token that is at the very end of the 
+		document.
+
+I was trying to pass a short signe int into a string format, but it kept interpreting it as 
+an int. To fix this, you can cast the literal number passed into the string format to a
+signed short int.
+
+
+QUESTIONS:
+
+**1. In xmas.j it seems to call a subroutine in lc4.asm. Do we need to know how to call handle
+function calls from other files?
+
+	I just need to JSR to the label. I don't need to RET from subroutines becuase this is already included in the subroutine definition.
+
+2. How are we supposed tosee what the LCC compiler does with our C files as it reads in tokens?
+
+3. If I read in from the file character by character, will the command always end with the 
+null char?
+
+4. Do I need to put the null character at the end of my string literal?
+
+	According to the C guide, I don't. One extra space for null is already added.
+
+5. How are we supposed to handle the keywords before the important information? (like defun 
+fact)
+
+6. Why is it that when I compile, it has cc in front of the command instead of clang?
+
+** 7. I keep geting an undefined reference whenever I try to make the executable.
+
+	This was because I had the .make tag in my filename. Never add that tag again to a
+	filename!!!
+
+** 8. Also, my make clean command is not working.
+
+	My make clean rule wasn't working because of the .make tag. NEVER ADD THAT TAG AGAIN! In 
+	the clean command, the jc is for the executable. The *.o is for removing all object files.
+
+** 9. In my stack manipulation functions (drop, dup, etc...) when I overwrite a register to 
+perform an operation, I need to store the value in that register somewhere in memory, right?
+If so, how do I know where to store a literal without overwriting actual data in memory?
+
+	I don't need to worry about registers storing values that I could overwrite because all 
+	of the information that I would need should be pushed onto the top of the stack. All operations that would need the registers to perform computations should just complete the operation immediately and push its return value to the top of the stack.
+
+**10. Should I cast the literal value to a 16-bit value and then break up the literal into a 
+hiconst/const pair. Are we allowed to use Pseudo-Instructions and Assembly Directives?
+
+	I wouldn't worry about the liteal value exceeding the range of a 16-bit int
+	Can use pseudo instructions and assembly directives.
+
+	defun should handle prologue stuff
+	return should handle epilogue stuff
+
+**11. I don't really understand the Piazza post called Reurn in J. So the J code will 
+manipulate the top of the stack to "clean it up", So we do need to do after the stack is 
+cleaned? Do we need to write code in C to do the prologue?
+
+	All of the stack popping should be perofrmed by the function in J. The return value should 
+	be diretly to by the stack pointer after the function cleans up. This is unlike what was 
+	shown in the lecture slides in which the RV was right after the stack pointer.
+
+**12. Should the return value always be right above the stack pointer or at the stack pointer?
+
+	No, see previous part.
+
+**13. How do check if our output assembly file is correct?
+
+14. My function is not writing out the signed short int passed into the fprintf as a signed 
+2C value. It's always an unsigned integer and it is causing overflow when th efile is 
+assembled.
+
+
+
+TO-DO LIST:
+Malloc strings where necessary.
